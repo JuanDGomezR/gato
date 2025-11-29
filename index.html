@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Gato Persa 2D Animado</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* Previene gestos de navegador */
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        canvas {
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        #ui-container {
+            position: absolute;
+            bottom: 40px;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .btn {
+            pointer-events: auto;
+            background: white;
+            border: 3px solid #000;
+            padding: 15px 30px;
+            border-radius: 50px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #000;
+            box-shadow: 4px 4px 0px rgba(0,0,0,1);
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .btn:active {
+            transform: translate(2px, 2px);
+            box-shadow: 2px 2px 0px rgba(0,0,0,1);
+            background: #f0f0f0;
+        }
+
+        #audio-unlock {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255,255,255,0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #000;
+            font-size: 1.5rem;
+            font-weight: bold;
+            z-index: 100;
+            cursor: pointer;
+        }
+
+        .instruction {
+            font-size: 1rem;
+            color: #555;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="audio-unlock">
+        <div>🐱 Toca para despertar al gato</div>
+        <div class="instruction">(Activa el sonido)</div>
+    </div>
+
+    <div id="ui-container">
+        <button class="btn" id="btn-meow">📢 Miau</button>
+        <button class="btn" id="btn-pet">✋ Acariciar</button>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="catCanvas"></canvas>
+    </div>
+
+    <script>
+        /**
+         * CONFIGURACIÓN
+         */
+        const canvas = document.getElementById('catCanvas');
+        const ctx = canvas.getContext('2d');
+        const audioUnlockScreen = document.getElementById('audio-unlock');
+        
+        // Estado del Gato
+        const cat = {
+            scale: 1,
+            breath: 0,
+            tailAngle: 0,
+            blinkOpen: 1, // 1 = abierto, 0 = cerrado
+            mouthY: 0,
+            purrOffset: 0,
+            mouseX: 0,
+            mouseY: 0,
+            isPurring: false
+        };
+
+        let time = 0;
+        let audioContext = null;
+        let animationFrame;
+
+        /**
+         * AJUSTE DE TAMAÑO (RESPONSIVE)
+         */
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            // Ajustar escala base según pantalla
+            const minDim = Math.min(canvas.width, canvas.height);
+            cat.baseScale = minDim / 600; // Escala relativa para que siempre quepa
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        /**
+         * BUCLE DE DIBUJO Y ANIMACIÓN
+         */
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            time += 0.05;
+
+            // --- CÁLCULOS DE ANIMACIÓN ---
+            
+            // Respiración (cuerpo se infla y desinfla)
+            cat.breath = Math.sin(time * 0.1) * 0.02;
+
+            // Cola (movimiento suave)
+            cat.tailAngle = Math.sin(time * 0.15) * 0.15; // Oscilación base
+            if(cat.isPurring) {
+                // Si ronronea, vibra el cuerpo
+                cat.purrOffset = (Math.random() - 0.5) * 2;
+                cat.tailAngle += Math.sin(time * 0.5) * 0.1; // Cola más rápida
+            } else {
+                cat.purrOffset = 0;
+            }
+
+            // Seguimiento de ojos (Mouse)
+            // Calculamos desplazamiento de pupilas limitado
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const lookX = (cat.mouseX - centerX) / (canvas.width/2);
+            const lookY = (cat.mouseY - centerY) / (canvas.height/2);
+
+            // --- DIBUJO ---
+            
+            ctx.save();
+            ctx.translate(canvas.width / 2 + cat.purrOffset, canvas.height / 2 + 100 * cat.baseScale);
+            ctx.scale(cat.baseScale * (1 + cat.breath), cat.baseScale * (1 + cat.breath * 0.5));
+
+            // Configuración de línea estilo dibujo
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = 6;
+            ctx.strokeStyle = 'black';
+            ctx.fillStyle = 'white';
+
+            drawTail(ctx, cat.tailAngle);
+            drawBody(ctx);
+            drawFace(ctx, lookX, lookY);
+
+            ctx.restore();
+
+            animationFrame = requestAnimationFrame(animate);
+        }
+
+        /**
+         * DIBUJO DE PARTES (Usando curvas para imitar la foto)
+         */
+        
+        function drawBody(ctx) {
+            ctx.beginPath();
+            // Silueta de "pera gorda" sentada
+            // Empezamos abajo al centro
+            ctx.moveTo(-60, 150); 
+            
+            // Pata izquierda (curva hacia afuera)
+            ctx.bezierCurveTo(-150, 150, -200, 50, -140, -50); // Lado izquierdo gordo
+            
+            // Hombro izquierdo hacia oreja izquierda
+            ctx.bezierCurveTo(-120, -100, -100, -150, -70, -180);
+
+            // Oreja izquierda
+            ctx.lineTo(-80, -220); // Punta
+            ctx.lineTo(-40, -190); // Base interior
+
+            // Cabeza superior (plana/curva)
+            ctx.bezierCurveTo(-20, -200, 20, -200, 40, -190);
+
+            // Oreja derecha
+            ctx.lineTo(80, -220); // Punta
+            ctx.lineTo(70, -180); // Base exterior
+
+            // Hombro derecho hacia abajo
+            ctx.bezierCurveTo(100, -150, 120, -100, 140, -50);
+
+            // Lado derecho gordo
+            ctx.bezierCurveTo(200, 50, 150, 150, 60, 150);
+
+            // Cerramos abajo (base plana)
+            ctx.lineTo(-60, 150);
+            
+            ctx.fill();
+            ctx.stroke();
+
+            // Patas delanteras (líneas simples como el dibujo)
+            ctx.beginPath();
+            // Pata izq
+            ctx.moveTo(-30, 150);
+            ctx.lineTo(-30, 80);
+            // Pata der
+            ctx.moveTo(30, 150);
+            ctx.lineTo(30, 80);
+            
+            // Dedos (pequeñas marcas)
+            ctx.moveTo(-45, 145); ctx.lineTo(-45, 135);
+            ctx.moveTo(-15, 145); ctx.lineTo(-15, 135);
+            ctx.moveTo(15, 145); ctx.lineTo(15, 135);
+            ctx.moveTo(45, 145); ctx.lineTo(45, 135);
+
+            ctx.stroke();
+        }
+
+        function drawTail(ctx, angle) {
+            ctx.save();
+            ctx.translate(-130, 50); // Punto de anclaje de la cola
+            ctx.rotate(angle);
+            
+            ctx.beginPath();
+            // Cola gruesa y esponjosa curvada hacia arriba y afuera
+            ctx.moveTo(0, 0);
+            ctx.bezierCurveTo(-80, 0, -120, -50, -100, -100); // Curva exterior
+            ctx.bezierCurveTo(-80, -150, -20, -120, 0, -80); // Punta
+            ctx.bezierCurveTo(-10, -50, -10, -20, 0, 0); // Curva interior
+            
+            ctx.fill();
+            ctx.stroke();
+            
+            // Detalles de pelaje en la cola (rayitas)
+            ctx.beginPath();
+            ctx.moveTo(-90, -80); ctx.lineTo(-80, -70);
+            ctx.moveTo(-100, -60); ctx.lineTo(-90, -50);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        function drawFace(ctx, lookX, lookY) {
+            // Posición de la cara en el cuerpo
+            const faceY = -80; 
+
+            // Ojos
+            const eyeSep = 50;
+            const eyeSize = 25;
+            
+            drawEye(ctx, -eyeSep, faceY, eyeSize, lookX, lookY);
+            drawEye(ctx, eyeSep, faceY, eyeSize, lookX, lookY);
+
+            // Nariz (Triángulo pequeño)
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.moveTo(-8, faceY + 25);
+            ctx.lineTo(8, faceY + 25);
+            ctx.lineTo(0, faceY + 35);
+            ctx.fill();
+
+            // Boca (U invertida pequeña o línea seria)
+            ctx.beginPath();
+            ctx.moveTo(0, faceY + 35);
+            ctx.lineTo(-10, faceY + 45); // Lado izq
+            ctx.moveTo(0, faceY + 35);
+            ctx.lineTo(10, faceY + 45); // Lado der
+            ctx.stroke();
+
+            // Animación de boca (Miau)
+            if (cat.mouthY > 0) {
+                ctx.beginPath();
+                ctx.fillStyle = '#ffaaaa'; // Lengua/boca rosa
+                ctx.arc(0, faceY + 45, cat.mouthY, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+            }
+        }
+
+        function drawEye(ctx, x, y, size, lookX, lookY) {
+            ctx.save();
+            ctx.translate(x, y);
+
+            // Fondo blanco del ojo
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.arc(0, 0, size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Pupila (limitada dentro del ojo)
+            const pX = Math.max(-10, Math.min(10, lookX * 10));
+            const pY = Math.max(-5, Math.min(10, lookY * 10));
+            
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.arc(pX, pY, 4, 0, Math.PI * 2); // Pupila pequeña estilo dibujo
+            ctx.fill();
+
+            // Párpado "Grumpy" (Línea recta cortando la parte superior)
+            const lidHeight = (1 - cat.blinkOpen) * size * 2; // Para parpadeo completo
+            const grumpyOffset = size * 0.4; // Párpado siempre un poco bajo para verse enojado
+            
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            // Rectángulo que cubre la parte superior del ojo
+            ctx.rect(-size - 2, -size - 2, size * 2 + 4, size + grumpyOffset + lidHeight);
+            ctx.fill();
+            
+            // Línea del párpado
+            ctx.beginPath();
+            ctx.moveTo(-size, grumpyOffset - 5 + lidHeight); 
+            ctx.lineTo(size, grumpyOffset - 5 + lidHeight); 
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        /**
+         * LÓGICA DE ANIMACIÓN ESPECÍFICA
+         */
+        
+        // Parpadeo automático
+        function blinkLoop() {
+            // Parpadear
+            let closing = true;
+            const blinkAnim = setInterval(() => {
+                if(closing) {
+                    cat.blinkOpen -= 0.1;
+                    if(cat.blinkOpen <= 0) closing = false;
+                } else {
+                    cat.blinkOpen += 0.1;
+                    if(cat.blinkOpen >= 1) {
+                        cat.blinkOpen = 1;
+                        clearInterval(blinkAnim);
+                        // Programar siguiente parpadeo
+                        setTimeout(blinkLoop, Math.random() * 3000 + 2000);
+                    }
+                }
+            }, 16);
+        }
+
+        // Animación Miau
+        function animateMeow() {
+            let opening = true;
+            const meowAnim = setInterval(() => {
+                if(opening) {
+                    cat.mouthY += 1;
+                    if(cat.mouthY >= 10) opening = false;
+                } else {
+                    cat.mouthY -= 1;
+                    if(cat.mouthY <= 0) {
+                        cat.mouthY = 0;
+                        clearInterval(meowAnim);
+                    }
+                }
+            }, 30);
+        }
+
+        /**
+         * INTERACCIÓN Y EVENTOS
+         */
+        
+        // Mouse / Touch
+        function handleMove(x, y) {
+            cat.mouseX = x;
+            cat.mouseY = y;
+        }
+        canvas.addEventListener('mousemove', e => handleMove(e.clientX, e.clientY));
+        canvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            handleMove(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: false });
+
+        // Click en gato
+        canvas.addEventListener('click', () => {
+             // Pequeño salto
+             const jump = setInterval(() => {
+                 cat.purrOffset = Math.sin(Date.now()) * 5;
+             }, 16);
+             setTimeout(() => {
+                 clearInterval(jump);
+                 cat.purrOffset = 0;
+             }, 200);
+             animateMeow();
+        });
+
+        // Botones UI
+        document.getElementById('btn-meow').addEventListener('click', (e) => {
+            e.stopPropagation();
+            playMeow();
+            animateMeow();
+        });
+
+        document.getElementById('btn-pet').addEventListener('click', (e) => {
+            e.stopPropagation();
+            togglePurr();
+        });
+
+        function togglePurr() {
+            cat.isPurring = !cat.isPurring;
+            const btn = document.getElementById('btn-pet');
+            if(cat.isPurring) {
+                btn.style.background = '#eee';
+                btn.textContent = '💤 Relajarse';
+                playPurr();
+            } else {
+                btn.style.background = 'white';
+                btn.textContent = '✋ Acariciar';
+                stopPurr();
+            }
+        }
+
+        /**
+         * SISTEMA DE AUDIO (Web Audio API)
+         */
+        
+        function initAudio() {
+            if (!audioContext) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioContext = new AudioContext();
+            }
+            if (audioContext.state === 'suspended') audioContext.resume();
+            
+            audioUnlockScreen.style.opacity = '0';
+            setTimeout(() => audioUnlockScreen.remove(), 500);
+            
+            animate(); // Iniciar animación visual
+            blinkLoop(); // Iniciar bucle de parpadeo
+            playMeow();
+        }
+
+        audioUnlockScreen.addEventListener('click', initAudio);
+
+        function playMeow() {
+            if (!audioContext) return;
+            const t = audioContext.currentTime;
+            const osc = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+
+            osc.type = 'triangle';
+            // Maullido tipo "mrah"
+            osc.frequency.setValueAtTime(400, t);
+            osc.frequency.linearRampToValueAtTime(600, t + 0.1); // Sube
+            osc.frequency.exponentialRampToValueAtTime(300, t + 0.4); // Baja
+
+            gain.gain.setValueAtTime(0, t);
+            gain.gain.linearRampToValueAtTime(0.2, t + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+
+            osc.connect(gain);
+            gain.connect(audioContext.destination);
+            osc.start(t);
+            osc.stop(t + 0.5);
+        }
+
+        let purrOsc, purrLFO, purrGain;
+        function playPurr() {
+            if (!audioContext) return;
+            const t = audioContext.currentTime;
+            
+            purrOsc = audioContext.createOscillator();
+            purrOsc.type = 'sawtooth';
+            purrOsc.frequency.value = 25; // Grave
+
+            purrLFO = audioContext.createOscillator();
+            purrLFO.type = 'sine';
+            purrLFO.frequency.value = 5; // Rítmico
+
+            const filter = audioContext.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = 150;
+
+            purrGain = audioContext.createGain();
+            purrGain.gain.value = 0.5;
+
+            const am = audioContext.createGain();
+            
+            purrLFO.connect(am.gain);
+            purrOsc.connect(filter);
+            filter.connect(am);
+            am.connect(purrGain);
+            purrGain.connect(audioContext.destination);
+
+            purrOsc.start(t);
+            purrLFO.start(t);
+        }
+
+        function stopPurr() {
+            if(purrGain) {
+                const t = audioContext.currentTime;
+                purrGain.gain.setTargetAtTime(0, t, 0.1);
+                setTimeout(() => {
+                    if(purrOsc) { purrOsc.stop(); purrLFO.stop(); }
+                }, 200);
+            }
+        }
+
+    </script>
+</body>
+</html>
